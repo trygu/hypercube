@@ -36,30 +36,44 @@ static int failures = 0;
 
 int main(void)
 {
-    const char *workdir = "ghm_smoke_workdir";
+    const char *steer = "ghm_smoke_steer";
+    const char *cells = "ghm_smoke_cells";
+    const char *out = "ghm_smoke_out";
+    ghm_params p;
     ghm_result res;
 
-    mkdir(workdir, 0755);
+    memset(&p, 0, sizeof(p));
+    p.minw = 0.0;
+    p.maxw = 1000.0;
+    p.exact = 0;
 
-    /* No control file. */
-    CHECK(ghm_run(workdir, &res) == GHM_ERR_NO_CONTROL,
-          "missing control file -> GHM_ERR_NO_CONTROL");
-    CHECK(res.code == GHM_ERR_NO_CONTROL, "result code matches");
+    /* Null arguments are rejected. */
+    CHECK(ghm_run(NULL, cells, out, &p, &res) == GHM_ERR_BAD_ARGS,
+          "null steering rejected");
+    CHECK(ghm_run(steer, NULL, out, &p, &res) == GHM_ERR_BAD_ARGS,
+          "null cells rejected");
+    CHECK(ghm_run(steer, cells, NULL, &p, &res) == GHM_ERR_BAD_ARGS,
+          "null result rejected");
+    CHECK(ghm_run(steer, cells, out, NULL, &res) == GHM_ERR_BAD_ARGS,
+          "null params rejected");
+    CHECK(ghm_run(steer, cells, out, &p, NULL) == GHM_ERR_BAD_ARGS,
+          "null result struct rejected");
+
+    /* No steering file. */
+    CHECK(ghm_run(steer, cells, out, &p, &res) == GHM_ERR_NO_STEERING,
+          "missing steering file -> GHM_ERR_NO_STEERING");
+    CHECK(res.code == GHM_ERR_NO_STEERING, "result code matches");
     CHECK(res.message[0] != '\0', "message filled");
 
-    /* Null arguments. */
-    CHECK(ghm_run(NULL, &res) == GHM_ERR_BAD_ARGS, "null workdir rejected");
-    CHECK(ghm_run(workdir, NULL) == GHM_ERR_BAD_ARGS, "null result rejected");
-
-    /* With a control file present the entry point runs and reports
+    /* With a steering file present the entry point runs and reports
      * the port status (not implemented until the algorithm lands). */
-    FILE *fd = fopen("ghm_smoke_workdir/ghm.control", "w");
-    CHECK(fd != NULL, "create tabelle");
+    FILE *fd = fopen(steer, "w");
+    CHECK(fd != NULL, "create steering file");
     if (fd) {
         fprintf(fd, "0\n1 1 0\n0.0 1000.0\n0.0\n0\n2\n1\n");
         fclose(fd);
     }
-    CHECK(ghm_run(workdir, &res) == GHM_ERR_NOT_IMPLEMENTED,
+    CHECK(ghm_run(steer, cells, out, &p, &res) == GHM_ERR_NOT_IMPLEMENTED,
           "port-in-progress status reported");
     CHECK(res.code == GHM_ERR_NOT_IMPLEMENTED, "result code matches");
     CHECK(res.message[0] != '\0', "message filled");

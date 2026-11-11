@@ -27,16 +27,40 @@ extern "C" {
 
 /* Result codes returned by ghm_run (also in ghm_result.code). */
 #define GHM_OK                    0
-#define GHM_ERR_BAD_ARGS         -1
-#define GHM_ERR_NO_CONTROL       -2  /* no control file in workdir */
-#define GHM_ERR_PARSE_CONTROL    -3
-#define GHM_ERR_PARSE_STEERING   -4
-#define GHM_ERR_PARSE_CELLS      -5
-#define GHM_ERR_NOT_IMPLEMENTED -100 /* port in progress */
+#define GHM_ERR_BAD_ARGS          -1
+#define GHM_ERR_NO_STEERING       -2  /* steering file missing */
+#define GHM_ERR_PARSE_STEERING    -3
+#define GHM_ERR_NO_CELLS          -4
+#define GHM_ERR_PARSE_CELLS       -5
+#define GHM_ERR_ALGORITHM         -6  /* internal algorithm error */
+#define GHM_ERR_NOT_IMPLEMENTED  -100 /* port in progress */
+
+/*
+ * Run-level parameters that in the legacy flow lived in the control
+ * file (TABELLE). The binding fills these from the batch's GH
+ * suppress command. The per-dimension structure (codes, hierarchy
+ * levels, boundary flags) comes from the steering file; the cell
+ * values and the primary-suppression marker come from the cells file.
+ * This is the initial set; it is finalized as the steering parser
+ * lands (the COMMON /MWX/, /ABSBET/, /EXACT/ blocks of the Fortran).
+ */
+typedef struct {
+    double minw;     /* lower bound of the safety interval */
+    double maxw;     /* upper bound of the safety interval */
+    double nulw;     /* value treated as null / below threshold */
+    double absbet;   /* absolute tolerance */
+    double qquote;   /* quota, relative part */
+    double dquote;   /* quota, absolute part */
+    int    gewran;   /* weighting mode */
+    int    schaez;   /* threshold mode */
+    int    mode;     /* 0, 2 or 4 (2 and 4 read weight parameters) */
+    int    print1;   /* verbose diagnostics (0/1) */
+    int    exact;    /* frozen-cell behaviour (0/1/2) */
+} ghm_params;
 
 typedef struct {
     int code;          /* GHM_OK on success, a GHM_ERR_* otherwise */
-    long n_secondary;  /* cells marked secondarily unsafe, all tables */
+    long n_secondary;  /* cells marked secondarily unsafe */
     char message[512]; /* human-readable detail, empty on GHM_OK */
 } ghm_result;
 
@@ -44,22 +68,25 @@ typedef struct {
  * Run the GHMITER (hypercube) secondary-suppression algorithm in
  * process. Replaces the legacy external GHMITER executable.
  *
- * File contract with the tauargus core (the record formats are
- * unchanged from the legacy flow): the core writes a control file
- * plus, per table, a steering file (code structure, hierarchy
- * levels) and a cells file (one record per cell; value type 129
- * marks a primary suppression); this library reads them from
- * workdir, runs the algorithm, and writes, per table, the result
- * file whose per-cell lines carry a leading token of 1129 where the
- * cell is set secondarily unsafe (the core reads that file back via
- * CGhmiter::SetSecondaryUnsafe). File names are English; the legacy
- * executable used German names, but they are data listed in the
- * control file, so both sides are free to choose (see the README).
+ * The shape matches the other suppression modules (hitas, rounder):
+ * the caller passes explicit file names and the library streams
+ * them; there is no control file and no working directory, and the
+ * caller owns the paths (in the binding, a scoped temp directory, as
+ * in the MOD/OPT/RND flow). The tauargus core writes the steering
+ * file (code structure, hierarchy levels) and the cells file (one
+ * record per cell; value type 129 marks a primary suppression); this
+ * library reads them, runs the algorithm, and writes the result file
+ * whose per-cell lines carry a leading token of 1129 where the cell
+ * is set secondarily unsafe (the core reads that file back via
+ * CGhmiter::SetSecondaryUnsafe). The record formats are unchanged
+ * from the legacy flow; the file names are English (see the README).
+ * One table per call.
  *
  * On success returns 0 and fills *res with code GHM_OK.
  * On failure returns the GHM_ERR_* code and fills *res with it.
  */
-int ghm_run(const char *workdir, ghm_result *res);
+int ghm_run(const char *steer_file, const char *cells_file,
+            const char *result_file, const ghm_params *p, ghm_result *res);
 
 #ifdef __cplusplus
 }
