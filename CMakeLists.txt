@@ -19,6 +19,7 @@ set(GHM_SRC
     src/ghm.c
     src/ghm_cells.c
     src/ghm_steering.c
+    src/ghm_iter.c
 )
 
 option(BUILD_SHARED_LIBS "Build shared native libraries" ON)
@@ -39,6 +40,12 @@ target_compile_options(tauargus_ghm PRIVATE
 )
 
 target_compile_features(tauargus_ghm PUBLIC c_std_99)
+
+# The algorithm uses log() for its information-loss cost.
+find_library(GHM_MATH_LIB m)
+if(GHM_MATH_LIB)
+    target_link_libraries(tauargus_ghm PUBLIC ${GHM_MATH_LIB})
+endif()
 
 # Export all symbols from the Windows DLL (the module exposes a small
 # plain C API).
@@ -68,4 +75,8 @@ if(TAUARGUS_GHM_BUILD_TESTS)
     add_executable(ghm_steering_test tests/ghm_steering_test.c)
     target_link_libraries(ghm_steering_test PRIVATE tauargus_ghm)
     add_test(NAME ghm_steering COMMAND ghm_steering_test)
+
+    add_executable(ghm_iter_test tests/ghm_iter_test.c)
+    target_link_libraries(ghm_iter_test PRIVATE tauargus_ghm)
+    add_test(NAME ghm_iter COMMAND ghm_iter_test)
 endif()
