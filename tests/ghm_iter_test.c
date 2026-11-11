@@ -37,6 +37,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ghm.h"
@@ -219,6 +220,196 @@ static void run_case(const char *name, const char *const *eingabe,
     }
 }
 
+/* --- flat n-D cases (3D..6D) ------------------------------------------
+ *
+ * The flat 2D cases above are hand-built ground truth. For 3D..6D the
+ * fixtures are generated the same way as the oracle run: a flat table
+ * with 3 codes per dimension, one primary at the center cell (code 1 in
+ * every dimension), and a distinct positive value per cell (value =
+ * position + 1) so the log costs never tie. With that value layout the
+ * minimum-cost hypercube pairs every dimension with its sibling code 2,
+ * so the secondary cells are exactly the {1,2}^n corners (the center
+ * primary plus 2^n - 1 secondaries); every other cell is safe.
+ */
+static long ipow(long base, int exp)
+{
+    long r = 1;
+    for (int i = 0; i < exp; i++)
+        r *= base;
+    return r;
+}
+
+static void write_steer_file(const char *path, int ndim, int n_codes)
+{
+    FILE *fd = fopen(path, "w");
+    if (!fd)
+        return;
+    fprintf(fd, "'T%dD'\n", ndim);
+    fprintf(fd, "'(5(A8,1X)) '\n");
+    fprintf(fd, "%d\n", ndim);
+    for (int i = 0; i < ndim; i++)
+        fprintf(fd, "%s2", i ? " " : "");
+    fprintf(fd, "\n");
+    for (int i = 0; i < ndim; i++)
+        fprintf(fd, "%s1", i ? " " : "");
+    fprintf(fd, "\n");
+    for (int i = 0; i < ndim; i++)
+        fprintf(fd, "%s0.0", i ? " " : "");
+    fprintf(fd, "\n");
+    for (int i = 0; i < ndim; i++) {
+        fprintf(fd, "'Var %d'\n", i + 1);
+        fprintf(fd, "%d 1\n", n_codes - 1);
+        for (int j = n_codes - 1; j >= 0; j--)
+            fprintf(fd, "%s%08d", j == n_codes - 1 ? "" : " ", j);
+        fprintf(fd, "\n");
+    }
+    fprintf(fd, "0.0 0.0\n");
+    fprintf(fd, "1 1 1\n");
+    fclose(fd);
+}
+
+static void write_eingabe_file(const char *path, int ndim, int n_codes)
+{
+    FILE *fd = fopen(path, "w");
+    if (!fd)
+        return;
+    long total = ipow(n_codes, ndim);
+    for (long i = 0; i < total; i++) {
+        long c[8];
+        for (int d = 0; d < ndim; d++)
+            c[d] = (n_codes - 1) - ((i / ipow(n_codes, d)) % n_codes);
+        int is_prim = 1;
+        for (int d = 0; d < ndim; d++)
+            if (c[d] != 1)
+                is_prim = 0;
+        double v = (double)(i + 1);
+        fprintf(fd, "%d 0 %.2f 1 1 %.2f %.2f",
+                is_prim ? 129 : 1, v, v, v);
+        for (int d = 0; d < ndim; d++)
+            fprintf(fd, " '%08ld'", c[d]);
+        for (int d = 0; d < ndim; d++)
+            fprintf(fd, " '%08ld'", c[d]);
+        fprintf(fd, "\n");
+    }
+    fclose(fd);
+}
+
+/* Parse a result line: the leading wertart plus up to maxk single-quoted
+ * key values. Returns the number of keys parsed, or -1 on a bad line. */
+static int parse_result_line_nd(const char *line, int *wertart,
+                                long *keys, int maxk)
+{
+    if (sscanf(line, "%d", wertart) != 1)
+        return -1;
+    int n = 0;
+    const char *p = line;
+    while (n < maxk && (p = strchr(p, '\'')) != NULL) {
+        const char *e = strchr(p + 1, '\'');
+        if (!e)
+            return -1;
+        char *end;
+        long v = strtol(p + 1, &end, 10);
+        if (end == p + 1)
+            return -1;
+        keys[n++] = v;
+        p = e + 1;
+    }
+    return n;
+}
+
+static void run_ndim_case(int ndim, int n_codes, const ghm_params *p)
+{
+    char name[32];
+    snprintf(name, sizeof name, "flat%dd", ndim);
+
+    write_steer_file("ghm_nd_stuer.txt", ndim, n_codes);
+    write_eingabe_file("ghm_nd_eingabe.txt", ndim, n_codes);
+
+    ghm_result res;
+    int rc = ghm_run("ghm_nd_stuer.txt", "ghm_nd_eingabe.txt",
+                     "ghm_nd_ausgabe.txt", p, &res);
+    if (rc != GHM_OK) {
+        printf("FAIL: %s: rc=%d (%s)\n", name, rc, res.message);
+        failures++;
+        return;
+    }
+
+    long total = ipow(n_codes, ndim);
+    long exp_nsec = ipow(2, ndim) - 1;
+    long exp_safe = total - ipow(2, ndim);
+    if (res.n_secondary != exp_nsec) {
+        printf("FAIL: %s n_secondary=%ld want %ld\n", name,
+               res.n_secondary, exp_nsec);
+        failures++;
+    }
+
+    FILE *fd = fopen("ghm_nd_ausgabe.txt", "r");
+    if (!fd) {
+        printf("FAIL: %s result file missing\n", name);
+        failures++;
+        return;
+    }
+
+    char line[1024];
+    long li = 0, npri = 0, nsec = 0, nsafe = 0;
+    while (fgets(line, sizeof line, fd)) {
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0')
+            continue;
+        int w;
+        long keys[8];
+        int nk = parse_result_line_nd(line, &w, keys, 8);
+        if (nk != ndim) {
+            printf("FAIL: %s line %ld parsed %d keys, want %d\n",
+                   name, li + 1, nk, ndim);
+            failures++;
+            continue;
+        }
+        /* The result must be in the cells-file (WriteCell) order, which
+         * is the mixed-radix position the keys encode. */
+        long rank = 0;
+        for (int d = 0; d < ndim; d++)
+            rank += (long)(n_codes - 1 - keys[d]) * ipow(n_codes, d);
+        if (rank != li) {
+            printf("FAIL: %s line %ld: keys at rank %ld, order broken\n",
+                   name, li + 1, rank);
+            failures++;
+        }
+        /* Expected value type: the center cell is the primary; the
+         * {1,2}^n corners are secondary; everything else is safe. */
+        int all_one = 1, all_12 = 1;
+        for (int d = 0; d < ndim; d++) {
+            if (keys[d] != 1)
+                all_one = 0;
+            if (keys[d] != 1 && keys[d] != 2)
+                all_12 = 0;
+        }
+        int exp = all_one ? 129 : (all_12 ? 1129 : 1);
+        if (w != exp) {
+            printf("FAIL: %s line %ld wertart=%d want %d\n", name, li + 1,
+                   w, exp);
+            failures++;
+        }
+        if (w == 129)
+            npri++;
+        else if (w == 1129)
+            nsec++;
+        else
+            nsafe++;
+        li++;
+    }
+    fclose(fd);
+
+    if (li != total) {
+        printf("FAIL: %s wrote %ld lines, want %ld\n", name, li, total);
+        failures++;
+    }
+    if (npri != 1 || nsec != exp_nsec || nsafe != exp_safe) {
+        printf("FAIL: %s counts pri=%ld sec=%ld safe=%ld want 1/%ld/%ld\n",
+               name, npri, nsec, nsafe, exp_nsec, exp_safe);
+        failures++;
+    }
+}
+
 int main(void)
 {
     /* Control-file (TABELLE) run parameters for the flat 2D cases. */
@@ -239,6 +430,16 @@ int main(void)
     run_case("flat2d", eingabe_1, expected_1, 3, &p);
     run_case("flat2d_cost", eingabe_cost, expected_cost, 3, &p);
     run_case("flat2d_shared", eingabe_shared, expected_shared, 2, &p);
+
+    /* n-D flat cases: distinct values -> the {1,2}^n hypercube. Keep the
+     * bounds honest for the value range (the flat path ignores them). */
+    ghm_params pn;
+    memcpy(&pn, &p, sizeof pn);
+    pn.maxw = 10000.0;
+    run_ndim_case(3, 3, &pn);
+    run_ndim_case(4, 3, &pn);
+    run_ndim_case(5, 3, &pn);
+    run_ndim_case(6, 3, &pn);
 
     if (failures == 0)
         printf("ghm_iter_test: OK\n");

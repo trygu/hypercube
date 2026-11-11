@@ -59,3 +59,18 @@ and scratch files `FT09FILE`, `FT10FILE`, `FT12FILE` in place.
 Compare the C result file to `expected_AUSGABE` by first token
 and key pair per line (the float field widths differ between
 implementations and are not part of the contract).
+
+## The flat n-D cases (3D..6D)
+
+`tests/ghm_iter_test.c` also drives the 3-, 4-, 5- and 6-D flat
+tables. Those fixtures are generated in the test (`write_steer_file`
+/ `write_eingabe_file`) rather than committed as files, and are
+cross-checked against the same gfortran oracle: a flat table with 3
+codes per dimension, one primary at the center cell (code 1 in every
+dimension), and a distinct positive value per cell (`position + 1`)
+so the log costs never tie. With that value layout the minimum-cost
+hypercube pairs every dimension with its sibling code 2, so the
+secondary cells are exactly the `{1,2}^n` corners: the center primary
+plus `2^n - 1` secondaries (7, 15, 31, 63 for 3..6D), every other
+cell safe. The test asserts that pattern, the secondary count, and
+the `WriteCell` line order, for each dimension.
