@@ -33,19 +33,19 @@ int ghm_run(const char *workdir, ghm_result *res)
 
     memset(res, 0, sizeof(*res));
 
-    snprintf(path, sizeof(path), "%s/tabelle", workdir);
+    snprintf(path, sizeof(path), "%s/ghm.control", workdir);
     fd = fopen(path, "r");
     if (!fd) {
-        res->code = GHM_ERR_NO_TABELLE;
+        res->code = GHM_ERR_NO_CONTROL;
         snprintf(res->message, sizeof(res->message),
-                 "no tabelle control file in %s", workdir);
+                 "no control file in %s", workdir);
         return res->code;
     }
     fclose(fd);
 
-    /* Port in progress: the tabelle/steuer/eingabe parsers and the
-     * algorithm follow; the entry point is validated up to the
-     * control-file check. */
+    /* Port in progress: the control/steering/cells parsers and the
+     * algorithm follow (one source file each, see the README); the
+     * entry point is validated up to the control-file check. */
     res->code = GHM_ERR_NOT_IMPLEMENTED;
     snprintf(res->message, sizeof(res->message),
              "GHMITER port in progress: algorithm not yet implemented");

@@ -28,10 +28,10 @@ extern "C" {
 /* Result codes returned by ghm_run (also in ghm_result.code). */
 #define GHM_OK                    0
 #define GHM_ERR_BAD_ARGS         -1
-#define GHM_ERR_NO_TABELLE       -2  /* no tabelle control file in workdir */
-#define GHM_ERR_PARSE_TABELLE    -3
-#define GHM_ERR_PARSE_STEUER     -4
-#define GHM_ERR_PARSE_EINGABE    -5
+#define GHM_ERR_NO_CONTROL       -2  /* no control file in workdir */
+#define GHM_ERR_PARSE_CONTROL    -3
+#define GHM_ERR_PARSE_STEERING   -4
+#define GHM_ERR_PARSE_CELLS      -5
 #define GHM_ERR_NOT_IMPLEMENTED -100 /* port in progress */
 
 typedef struct {
@@ -44,13 +44,17 @@ typedef struct {
  * Run the GHMITER (hypercube) secondary-suppression algorithm in
  * process. Replaces the legacy external GHMITER executable.
  *
- * File contract with the tauargus core (unchanged from the legacy
- * flow): the core writes, per table, a steuer steering file and an
- * eingabe cell-record file plus a tabelle control file; this library
- * reads them from workdir, runs the algorithm, and writes, per
- * table, the result file whose per-cell lines carry a leading token
- * of 1129 where the cell is set secondarily unsafe (the core reads
- * that file back via CGhmiter::SetSecondaryUnsafe).
+ * File contract with the tauargus core (the record formats are
+ * unchanged from the legacy flow): the core writes a control file
+ * plus, per table, a steering file (code structure, hierarchy
+ * levels) and a cells file (one record per cell; value type 129
+ * marks a primary suppression); this library reads them from
+ * workdir, runs the algorithm, and writes, per table, the result
+ * file whose per-cell lines carry a leading token of 1129 where the
+ * cell is set secondarily unsafe (the core reads that file back via
+ * CGhmiter::SetSecondaryUnsafe). File names are English; the legacy
+ * executable used German names, but they are data listed in the
+ * control file, so both sides are free to choose (see the README).
  *
  * On success returns 0 and fills *res with code GHM_OK.
  * On failure returns the GHM_ERR_* code and fills *res with it.

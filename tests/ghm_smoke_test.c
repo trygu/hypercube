@@ -41,19 +41,19 @@ int main(void)
 
     mkdir(workdir, 0755);
 
-    /* No tabelle control file. */
-    CHECK(ghm_run(workdir, &res) == GHM_ERR_NO_TABELLE,
-          "missing tabelle -> GHM_ERR_NO_TABELLE");
-    CHECK(res.code == GHM_ERR_NO_TABELLE, "result code matches");
+    /* No control file. */
+    CHECK(ghm_run(workdir, &res) == GHM_ERR_NO_CONTROL,
+          "missing control file -> GHM_ERR_NO_CONTROL");
+    CHECK(res.code == GHM_ERR_NO_CONTROL, "result code matches");
     CHECK(res.message[0] != '\0', "message filled");
 
     /* Null arguments. */
     CHECK(ghm_run(NULL, &res) == GHM_ERR_BAD_ARGS, "null workdir rejected");
     CHECK(ghm_run(workdir, NULL) == GHM_ERR_BAD_ARGS, "null result rejected");
 
-    /* With a tabelle present the entry point runs and reports the
-     * port status (not implemented until the algorithm lands). */
-    FILE *fd = fopen("ghm_smoke_workdir/tabelle", "w");
+    /* With a control file present the entry point runs and reports
+     * the port status (not implemented until the algorithm lands). */
+    FILE *fd = fopen("ghm_smoke_workdir/ghm.control", "w");
     CHECK(fd != NULL, "create tabelle");
     if (fd) {
         fprintf(fd, "0\n1 1 0\n0.0 1000.0\n0.0\n0\n2\n1\n");

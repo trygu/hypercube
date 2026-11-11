@@ -16,23 +16,49 @@ oracle; it is not part of the shipped build.
 ## File contract
 
 The legacy tool ran GHMITER as an external executable launched by the
-Java front-end; the core no longer launches anything. The file
-contract is unchanged, and it is the same one the core's
+Java front-end; the core no longer launches anything. The record
+formats are unchanged, and they are the same ones the core's
 `CGhmiter` helpers already implement:
 
-- the core writes a **tabelle** control file (dimension bound, table
-  list, per-table file names) plus, per table, a **steuer** steering
-  file (code structure, hierarchy levels) and an **eingabe** file
-  (one record per cell; WERTART 129 marks a primary suppression);
+- the core writes a **control** file (`ghm.control`: dimension bound,
+  table list, per-table file names) plus, per table, a **steering**
+  file (code structure, hierarchy levels) and a **cells** file
+  (one record per cell; value type 129 marks a primary suppression);
 - `ghm_run(workdir)` reads them, runs the algorithm, and writes, per
-  table, the result file whose per-cell lines carry a leading token
-  of `1129` where the cell is set **secondarily unsafe**, plus the
-  `PROTO001`-`PROTO003` diagnostic files;
+  table, the **result** file whose per-cell lines carry a leading
+  token of `1129` where the cell is set **secondarily unsafe**, plus
+  the `proto001`-`proto003` diagnostic files;
 - the core reads the result file back
   (`CGhmiter::SetSecondaryUnsafe`) and marks the cells.
 
+**Naming.** The legacy executable worked in German: files
+`TABELLE`/`STEUER`/`EINGABE`/`AUSGABE` and identifiers such as
+`WERTART` (value type), `GEWRAN` (weighting mode), `QQUOTE` (cube
+ratio). The C port uses English names and identifiers. The file
+names are data listed in the control file, so choosing English ones
+changes no format; the Fortran oracle runs with its own German
+names. A mapping table from the C identifiers to the Fortran
+originals is kept with the port for traceability.
+
 The algorithm is self-contained: no solver dependency (the legacy
 program called no external LP solver either).
+
+## Source layout
+
+One file per responsibility, following the other engine submodules:
+
+- `ghm.c` — entry point `ghm_run`, the per-table top-level loop
+- `ghm_control.c` — control file parser
+- `ghm_steering.c` — steering file parser (codes, hierarchy levels)
+- `ghm_cells.c` — cells file parser (per-cell records)
+- `ghm_iter.c` — the iterative suppression algorithm (cube ratio,
+  corner selection, protection-ratio degradation)
+- `ghm_frozen.c` — frozen-cell handling (the `EXACT` 0/1/2
+  behaviours)
+- `ghm_output.c` — result file and proto diagnostics
+
+`ghm.h` holds the public API and the shared structures. (Only the
+entry point exists so far; the split lands with the first parsers.)
 
 ## Status
 
