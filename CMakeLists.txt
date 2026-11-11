@@ -18,6 +18,7 @@ project(tauargus_ghm C)
 set(GHM_SRC
     src/ghm.c
     src/ghm_cells.c
+    src/ghm_steering.c
 )
 
 option(BUILD_SHARED_LIBS "Build shared native libraries" ON)
@@ -63,4 +64,8 @@ if(TAUARGUS_GHM_BUILD_TESTS)
     add_executable(ghm_cells_test tests/ghm_cells_test.c)
     target_link_libraries(ghm_cells_test PRIVATE tauargus_ghm)
     add_test(NAME ghm_cells COMMAND ghm_cells_test)
+
+    add_executable(ghm_steering_test tests/ghm_steering_test.c)
+    target_link_libraries(ghm_steering_test PRIVATE tauargus_ghm)
+    add_test(NAME ghm_steering COMMAND ghm_steering_test)
 endif()

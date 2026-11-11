@@ -102,6 +102,41 @@ int ghm_parse_cells(const char *path, ghm_cell **out, long *n,
 void ghm_free_cells(ghm_cell *cells, long n);
 
 /*
+ * The per-table code/hierarchy structure parsed from the steering
+ * (steuer) file, as written by CGhmiter::ControlDataTable. For a
+ * non-hierarchical dimension with n codes the core writes ms = 2
+ * (the n-1 individual codes plus the total), groups = {n-1, 1}, and
+ * lists all n code indices (descending). The group counts are the
+ * per-level code counts in descending level order, skipping empties;
+ * ncodes is their sum, the total number of codes listed. The trailing
+ * steering lines carry the table-level quota and weighting parameters.
+ */
+typedef struct {
+    char   table_name[128];
+    int    ndim;
+    int   *ms;        /* [ndim] number of levels per dimension */
+    int  **groups;    /* [ndim] ms[i] group counts, descending level */
+    int   *ncodes;    /* [ndim] total codes per dimension (sum of groups) */
+    long **codes;     /* [ndim] ncodes[i] code indices */
+    double qquote;    /* cube ratio, relative (steering tail) */
+    double dquote;    /* cube ratio, absolute (steering tail) */
+    int    gewran;    /* weighting mode (steering tail) */
+    int    schaez;    /* threshold mode (steering tail) */
+    int    idbqua;    /* quota flag (steering tail) */
+} ghm_table;
+
+/*
+ * Parse the steering (steuer) file for one table. Returns 0 on success
+ * and fills *out (released with ghm_free_table); -1 on error, setting
+ * errbuf. See ghm_table for the layout.
+ */
+int ghm_parse_steering(const char *path, ghm_table *out,
+                       char *errbuf, size_t errlen);
+
+/* Release a ghm_table filled by ghm_parse_steering. */
+void ghm_free_table(ghm_table *t);
+
+/*
  * Run the GHMITER (hypercube) secondary-suppression algorithm in
  * process. Replaces the legacy external GHMITER executable.
  *
