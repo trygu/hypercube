@@ -3,8 +3,8 @@
 # In-process C port of the GHMITER 4 Fortran program (Gießing/Repsilber;
 # original source kept under reference/fortran, EUPL 1.1,
 # sdcTools/hypercube). It replaces the legacy external GHMITER
-# executable: the tauargus core writes the steering files (steuer,
-# eingabe, tabelle), this library runs the algorithm and writes the
+# executable: the tauargus core writes, per table, a steering file
+# and a cells file, this library runs the algorithm and writes the
 # result file (leading token 1129 per cell = secondarily unsafe),
 # which the core reads back.
 #
@@ -17,6 +17,7 @@ project(tauargus_ghm C)
 
 set(GHM_SRC
     src/ghm.c
+    src/ghm_cells.c
 )
 
 option(BUILD_SHARED_LIBS "Build shared native libraries" ON)
@@ -58,4 +59,8 @@ if(TAUARGUS_GHM_BUILD_TESTS)
     add_executable(ghm_smoke_test tests/ghm_smoke_test.c)
     target_link_libraries(ghm_smoke_test PRIVATE tauargus_ghm)
     add_test(NAME ghm_smoke COMMAND ghm_smoke_test)
+
+    add_executable(ghm_cells_test tests/ghm_cells_test.c)
+    target_link_libraries(ghm_cells_test PRIVATE tauargus_ghm)
+    add_test(NAME ghm_cells COMMAND ghm_cells_test)
 endif()

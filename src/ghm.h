@@ -65,6 +65,43 @@ typedef struct {
 } ghm_result;
 
 /*
+ * One cell record from the cells (eingabe) file. The fields follow
+ * the legacy record; the mapping to the core writer
+ * (CGhmiter::WriteCell) is wertart=WERTART, freq=BERPFL, resp=WERT,
+ * gewi/hoew=GEWI/HOEW, fehl0=FEHLO (upper protection level),
+ * fehl1=FEHLU (lower protection level), dims=SCHL. The trailing code
+ * strings are the cell labels the core writes for traceability and
+ * linked tables; the Fortran oracle does not read them.
+ */
+typedef struct {
+    int    wertart;  /* 129 = primary unsafe, 1 = safe */
+    long   freq;
+    double resp;     /* cell value */
+    int    gewi;
+    int    hoew;
+    double fehl0;    /* upper protection level */
+    double fehl1;    /* lower protection level */
+    long   ndim;
+    long  *dims;     /* ndim keys (the cell address) */
+    char **codes;    /* ndim code strings (the cell labels) */
+} ghm_cell;
+
+/*
+ * Parse the cells (eingabe) file: one record per line. The first
+ * seven whitespace-separated fields are numeric (wertart, freq,
+ * resp, gewi, hoew, fehl0, fehl1); the remaining single-quoted
+ * tokens are ndim dimension keys followed by ndim code strings, so
+ * ndim is inferred as (quoted tokens) / 2. Returns 0 on success and
+ * fills *out (a malloc'd array of *n cells, released with
+ * ghm_free_cells); returns -1 on error and sets errbuf.
+ */
+int ghm_parse_cells(const char *path, ghm_cell **out, long *n,
+                    char *errbuf, size_t errlen);
+
+/* Release an array of ghm_cell returned by ghm_parse_cells. */
+void ghm_free_cells(ghm_cell *cells, long n);
+
+/*
  * Run the GHMITER (hypercube) secondary-suppression algorithm in
  * process. Replaces the legacy external GHMITER executable.
  *
