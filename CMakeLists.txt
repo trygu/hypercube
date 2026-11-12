@@ -58,6 +58,10 @@ install(TARGETS tauargus_ghm
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
+install(DIRECTORY src/
+    DESTINATION include/tauargus_ghm
+    FILES_MATCHING PATTERN "*.h"
+)
 
 # Smoke tests (run by the parent repo's dev loop,
 # scripts/dev-test.sh).
@@ -79,4 +83,8 @@ if(TAUARGUS_GHM_BUILD_TESTS)
     add_executable(ghm_iter_test tests/ghm_iter_test.c)
     target_link_libraries(ghm_iter_test PRIVATE tauargus_ghm)
     add_test(NAME ghm_iter COMMAND ghm_iter_test)
+
+    add_executable(ghm_validation_test tests/ghm_validation_test.c)
+    target_link_libraries(ghm_validation_test PRIVATE tauargus_ghm)
+    add_test(NAME ghm_validation COMMAND ghm_validation_test)
 endif()

@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "ghm.h"
 #include "ghm_iter.h"
@@ -35,6 +36,25 @@ int ghm_run(const char *steer_file, const char *cells_file,
 
     memset(res, 0, sizeof(*res));
     err[0] = '\0';
+
+    /* Modified 2026-11-12: unsupported controls must not silently degrade
+     * into the exact-only flat algorithm. These are the binding defaults. */
+    if (!isfinite(p->minw) || !isfinite(p->maxw) ||
+        !isfinite(p->nulw) || !isfinite(p->absbet) ||
+        !isfinite(p->qquote) || !isfinite(p->dquote)) {
+        res->code = GHM_ERR_BAD_ARGS;
+        snprintf(res->message, sizeof(res->message), "nonfinite GHM parameter");
+        return res->code;
+    }
+    if (p->minw != 1.0 || p->maxw != 100.0 || p->nulw != 0.0 ||
+        p->absbet != 0.0 || p->qquote != 0.0 || p->dquote != 0.0 ||
+        p->gewran != 1 || p->schaez != 1 || p->mode != 0 ||
+        p->exact != 1 || (p->print1 != 0 && p->print1 != 1)) {
+        res->code = GHM_ERR_UNSUPPORTED;
+        snprintf(res->message, sizeof(res->message),
+                 "only default flat mode 0 without quantitative protection is supported");
+        return res->code;
+    }
 
     /* A missing input file is a distinct, common failure mode; the
      * PARSE_* codes are reserved for files that exist but do not
@@ -54,6 +74,15 @@ int ghm_run(const char *steer_file, const char *cells_file,
     if (ghm_parse_steering(steer_file, &t, err, sizeof(err))) {
         res->code = GHM_ERR_PARSE_STEERING;
         snprintf(res->message, sizeof(res->message), "steering: %s", err);
+        return res->code;
+    }
+
+    if (t.qquote != 0.0 || t.dquote != 0.0 || t.gewran != 1 ||
+        t.schaez != 1 || t.idbqua != 1) {
+        ghm_free_table(&t);
+        res->code = GHM_ERR_UNSUPPORTED;
+        snprintf(res->message, sizeof(res->message),
+                 "steering quota/weight controls are not supported by flat GH");
         return res->code;
     }
 

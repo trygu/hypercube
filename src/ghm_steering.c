@@ -22,16 +22,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdint.h>
+#include <math.h>
 
 #include "ghm.h"
 
 /* Read one line, stripping the trailing CR/LF. Returns 0 on success,
- * -1 at end of file. */
+ * -1 at end of file, -2 on a read error or oversized record. */
 static int read_line(FILE *fd, char *buf, size_t len)
 {
     if (!fgets(buf, (int)len, fd))
-        return -1;
+        return ferror(fd) ? -2 : -1;
     size_t n = strlen(buf);
+    if (!strchr(buf, '\n') && !feof(fd)) return -2;
     while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r'))
         buf[--n] = '\0';
     return 0;
@@ -57,8 +62,7 @@ static int extract_quoted(const char *line, char *out, size_t outlen)
 }
 
 /* Parse up to max whitespace-separated integers from line into vals.
- * Returns how many were parsed. Stops at the first non-numeric token
- * (for example a quoted dimension label). */
+ * Returns how many were parsed, or -1 for a malformed numeric token. */
 static int parse_ints(const char *line, long *vals, int max)
 {
     int n = 0;
@@ -69,10 +73,31 @@ static int parse_ints(const char *line, long *vals, int max)
         if (!*p)
             break;
         char *end;
+        errno = 0;
         long v = strtol(p, &end, 10);
+        if (errno == ERANGE || (end != p && *end && !isspace((unsigned char)*end)))
+            return -1;
         if (end == p)
-            break;
+            return -1;
         vals[n++] = v;
+        p = end;
+    }
+    return n;
+}
+
+static int parse_reals(const char *line, double *vals, int max)
+{
+    int n = 0;
+    const char *p = line;
+    while (*p && n < max) {
+        while (isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        char *end;
+        errno = 0;
+        double value = strtod(p, &end);
+        if (end == p || errno == ERANGE || !isfinite(value) ||
+            (*end && !isspace((unsigned char)*end))) return -1;
+        vals[n++] = value;
         p = end;
     }
     return n;
@@ -84,15 +109,15 @@ int ghm_parse_steering(const char *path, ghm_table *out,
     FILE *fd;
     char line[8192];
     long tmp[256];
-
-    /* Initialise to a released state so the error paths are safe. */
-    memset(out, 0, sizeof(*out));
+    double reals[8];
 
     if (!path || !out) {
         if (errbuf && errlen)
             snprintf(errbuf, errlen, "null argument");
         return -1;
     }
+    /* Initialise to a released state so the error paths are safe. */
+    memset(out, 0, sizeof(*out));
 
     fd = fopen(path, "r");
     if (!fd) {
@@ -122,9 +147,9 @@ int ghm_parse_steering(const char *path, ghm_table *out,
     if (read_line(fd, line, sizeof(line)) < 0)
         FAIL("steering file too short: missing dimension count");
     {
-        int ndim = (int)strtol(line, NULL, 10);
-        if (ndim < 1 || ndim > 8)
+        if (parse_ints(line, tmp, 2) != 1 || tmp[0] < 1 || tmp[0] > 6)
             FAIL("steering: dimension count out of range");
+        int ndim = (int)tmp[0];
         out->ndim = ndim;
         out->ms     = calloc((size_t)ndim, sizeof(int));
         out->groups = calloc((size_t)ndim, sizeof(int *));
@@ -138,7 +163,7 @@ int ghm_parse_steering(const char *path, ghm_table *out,
     if (read_line(fd, line, sizeof(line)) < 0)
         FAIL("steering file too short: missing level counts");
     {
-        int n = parse_ints(line, tmp, out->ndim);
+        int n = parse_ints(line, tmp, out->ndim + 1);
         if (n != out->ndim)
             FAIL("steering: expected one level count per dimension");
         for (int i = 0; i < out->ndim; i++) {
@@ -149,12 +174,19 @@ int ghm_parse_steering(const char *path, ghm_table *out,
     }
 
     /* lines 5 and 6: the boundary flags (RFLAG) and the distance
-     * values (POT); not used by the algorithm in the flat mode-0
-     * case, so they are read past. */
+     * values (POT); only the core writer's flat defaults are supported. */
     if (read_line(fd, line, sizeof(line)) < 0)
         FAIL("steering file too short: missing boundary flags");
+    if (parse_ints(line, tmp, out->ndim + 1) != out->ndim)
+        FAIL("steering: malformed boundary flags");
+    for (int i = 0; i < out->ndim; i++)
+        if (tmp[i] != 1) FAIL("steering: nondefault boundary flags are unsupported");
     if (read_line(fd, line, sizeof(line)) < 0)
         FAIL("steering file too short: missing distance values");
+    if (parse_reals(line, reals, out->ndim + 1) != out->ndim)
+        FAIL("steering: malformed distance values");
+    for (int i = 0; i < out->ndim; i++)
+        if (reals[i] != 0) FAIL("steering: nondefault distance values are unsupported");
 
     /* one block per dimension: a quoted label, the per-level group
      * counts, then the listed codes. */
@@ -167,7 +199,7 @@ int ghm_parse_steering(const char *path, ghm_table *out,
         if (read_line(fd, line, sizeof(line)) < 0)
             FAIL("steering file too short: missing group counts");
         {
-            int n = parse_ints(line, tmp, out->ms[i]);
+            int n = parse_ints(line, tmp, out->ms[i] + 1);
             if (n != out->ms[i])
                 FAIL("steering: expected one group count per level");
             out->groups[i] = malloc((size_t)out->ms[i] * sizeof(int));
@@ -175,12 +207,14 @@ int ghm_parse_steering(const char *path, ghm_table *out,
                 FAIL("steering: out of memory");
             int total = 0;
             for (int j = 0; j < out->ms[i]; j++) {
-                if (tmp[j] < 0)
-                    FAIL("steering: negative group count");
+                if (tmp[j] < 0 || tmp[j] > INT_MAX || total > INT_MAX - tmp[j])
+                    FAIL("steering: invalid or overflowing group count");
                 out->groups[i][j] = (int)tmp[j];
                 total += (int)tmp[j];
             }
             out->ncodes[i] = total;
+            if ((size_t)total > SIZE_MAX / sizeof(long))
+                FAIL("steering: code array too large");
             out->codes[i] = total > 0 ?
                 malloc((size_t)total * sizeof(long)) : NULL;
             if (total > 0 && !out->codes[i])
@@ -194,6 +228,7 @@ int ghm_parse_steering(const char *path, ghm_table *out,
                 if (read_line(fd, line, sizeof(line)) < 0)
                     FAIL("steering file too short: truncated code list");
                 int n = parse_ints(line, tmp, 64);
+                if (n < 0) FAIL("steering: code index out of range");
                 for (int j = 0; j < n && got < out->ncodes[i]; j++)
                     out->codes[i][got++] = tmp[j];
             }
@@ -209,10 +244,25 @@ int ghm_parse_steering(const char *path, ghm_table *out,
     out->gewran = 1;
     out->schaez = 1;
     out->idbqua = 1;
-    if (read_line(fd, line, sizeof(line)) == 0 && line[0] != '\0')
-        sscanf(line, "%lf %lf", &out->qquote, &out->dquote);
-    if (read_line(fd, line, sizeof(line)) == 0 && line[0] != '\0')
-        sscanf(line, "%d %d %d", &out->gewran, &out->schaez, &out->idbqua);
+    int tail = read_line(fd, line, sizeof(line));
+    if (tail == -2) FAIL("steering: cannot read quota controls");
+    if (tail == 0 && line[0] != '\0') {
+        if (parse_reals(line, reals, 3) != 2)
+            FAIL("steering: malformed quota controls");
+        out->qquote = reals[0]; out->dquote = reals[1];
+    }
+    tail = read_line(fd, line, sizeof(line));
+    if (tail == -2) FAIL("steering: cannot read weight controls");
+    if (tail == 0 && line[0] != '\0') {
+        if (parse_ints(line, tmp, 4) != 3)
+            FAIL("steering: malformed weight controls");
+        for (int i = 0; i < 3; i++) {
+            if (tmp[i] < INT_MIN || tmp[i] > INT_MAX)
+                FAIL("steering: weight control out of range");
+        }
+        out->gewran = (int)tmp[0]; out->schaez = (int)tmp[1];
+        out->idbqua = (int)tmp[2];
+    }
 
     fclose(fd);
     return 0;

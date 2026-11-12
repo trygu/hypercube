@@ -21,43 +21,58 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
+#include <stdint.h>
 
 #include "ghm.h"
 
 /*
  * Collect every single-quoted token in a line into a growing array.
- * Returns the number of tokens stored, or -1 on allocation failure
- * (the partially filled array is left in *out; the caller must not
- * rely on freeing it in that case, an OOM path). Each token is a
+ * Returns the number of tokens stored, or -1 on malformed input or
+ * allocation failure (releasing all tokens already collected). Each token is a
  * malloc'd NUL-terminated string without the surrounding quotes.
  */
 static int collect_quoted(const char *line, char ***out, int *cap)
 {
     int i = 0;
     const char *p = line;
-    while ((p = strchr(p, '\'')) != NULL) {
+    while (*p) {
+        while (isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        if (*p != '\'') goto fail;
         const char *start = p + 1;
         const char *end = strchr(start, '\'');
         if (end == NULL)
-            break; /* unbalanced quote; stop */
+            goto fail;
+        if (i == 12) goto fail; /* at most six keys and six labels */
         if (i == *cap) {
             int ncap = *cap ? *cap * 2 : 8;
             char **tmp = realloc(*out, (size_t)ncap * sizeof(**out));
             if (!tmp)
-                return -1;
+                goto fail;
             *out = tmp;
             *cap = ncap;
         }
         size_t len = (size_t)(end - start);
         char *tok = malloc(len + 1);
         if (!tok)
-            return -1;
+            goto fail;
         memcpy(tok, start, len);
         tok[len] = '\0';
         (*out)[i++] = tok;
         p = end + 1;
+        if (*p && !isspace((unsigned char)*p)) goto fail;
     }
     return i;
+fail:
+    for (int j = 0; j < i; j++) free((*out)[j]);
+    free(*out);
+    *out = NULL;
+    *cap = 0;
+    return -1;
 }
 
 static void free_quoted(char **quoted, int n)
@@ -67,6 +82,53 @@ static void free_quoted(char **quoted, int n)
     for (int i = 0; i < n; i++)
         free(quoted[i]);
     free(quoted);
+}
+
+/* Modified 2026-11-12: checked conversions avoid scanf integer overflow
+ * and reject nonfinite numbers before any records become solver input. */
+static int read_integer(const char **cursor, long *value)
+{
+    char *end;
+    const char *p = *cursor;
+    while (isspace((unsigned char)*p)) p++;
+    errno = 0;
+    *value = strtol(p, &end, 10);
+    if (p == end || errno == ERANGE || (*end && !isspace((unsigned char)*end)))
+        return -1;
+    *cursor = end;
+    return 0;
+}
+
+static int read_int(const char **cursor, int *value)
+{
+    long n;
+    if (read_integer(cursor, &n) || n < INT_MIN || n > INT_MAX) return -1;
+    *value = (int)n;
+    return 0;
+}
+
+static int read_real(const char **cursor, double *value)
+{
+    char *end;
+    const char *p = *cursor;
+    while (isspace((unsigned char)*p)) p++;
+    errno = 0;
+    *value = strtod(p, &end);
+    if (p == end || errno == ERANGE || !isfinite(*value) ||
+        (*end && !isspace((unsigned char)*end))) return -1;
+    *cursor = end;
+    return 0;
+}
+
+static const char *parse_prefix(const char *line, ghm_cell *c)
+{
+    const char *p = line;
+    if (read_int(&p, &c->wertart) || read_integer(&p, &c->freq) ||
+        read_real(&p, &c->resp) || read_int(&p, &c->gewi) ||
+        read_int(&p, &c->hoew) || read_real(&p, &c->fehl0) ||
+        read_real(&p, &c->fehl1)) return NULL;
+    while (isspace((unsigned char)*p)) p++;
+    return *p == '\'' ? p : NULL;
 }
 
 int ghm_parse_cells(const char *path, ghm_cell **out, long *n,
@@ -93,13 +155,19 @@ int ghm_parse_cells(const char *path, ghm_cell **out, long *n,
     }
 
     while (fgets(line, sizeof(line), fd)) {
-        int wertart, gewi, hoew;
-        long freq;
-        double resp, fehl0, fehl1;
+        ghm_cell parsed;
+        const char *quoted_start;
         char **quoted = NULL;
         int qcap = 0, nq;
         long ndim;
         ghm_cell *c;
+
+        if (!strchr(line, '\n') && !feof(fd)) {
+            if (errbuf && errlen) snprintf(errbuf, errlen, "cell record too long");
+            fclose(fd);
+            ghm_free_cells(cells, count);
+            return -1;
+        }
 
         /* Skip blank lines. */
         {
@@ -110,30 +178,38 @@ int ghm_parse_cells(const char *path, ghm_cell **out, long *n,
                 continue;
         }
 
-        if (sscanf(line, "%d %ld %lf %d %d %lf %lf",
-                   &wertart, &freq, &resp, &gewi, &hoew, &fehl0, &fehl1) != 7) {
+        memset(&parsed, 0, sizeof parsed);
+        quoted_start = parse_prefix(line, &parsed);
+        if (!quoted_start) {
             if (errbuf && errlen)
                 snprintf(errbuf, errlen, "malformed cell record: %s", line);
             fclose(fd);
-            free(cells);
+            ghm_free_cells(cells, count);
             return -1;
         }
 
-        nq = collect_quoted(line, &quoted, &qcap);
-        if (nq < 0 || (nq % 2) != 0) {
+        nq = collect_quoted(quoted_start, &quoted, &qcap);
+        if (nq < 2 || nq > 12 || (nq % 2) != 0) {
             if (errbuf && errlen)
                 snprintf(errbuf, errlen,
-                         "expected an even number of quoted tokens, got %d",
+                         "expected 1..6 key/label pairs, got %d quoted tokens",
                          nq);
             if (nq >= 0)
                 free_quoted(quoted, nq);
             fclose(fd);
-            free(cells);
+            ghm_free_cells(cells, count);
             return -1;
         }
         ndim = nq / 2;
 
         if (count == cap) {
+            if (cap > LONG_MAX / 2 || (size_t)cap > SIZE_MAX / (2 * sizeof(*cells))) {
+                if (errbuf && errlen) snprintf(errbuf, errlen, "too many cell records");
+                free_quoted(quoted, nq);
+                fclose(fd);
+                ghm_free_cells(cells, count);
+                return -1;
+            }
             long ncap = cap ? cap * 2 : 16;
             ghm_cell *tmp = realloc(cells, (size_t)ncap * sizeof(*cells));
             if (!tmp) {
@@ -141,7 +217,7 @@ int ghm_parse_cells(const char *path, ghm_cell **out, long *n,
                     snprintf(errbuf, errlen, "out of memory");
                 free_quoted(quoted, nq);
                 fclose(fd);
-                free(cells);
+                ghm_free_cells(cells, count);
                 return -1;
             }
             cells = tmp;
@@ -149,13 +225,7 @@ int ghm_parse_cells(const char *path, ghm_cell **out, long *n,
         }
 
         c = &cells[count];
-        c->wertart = wertart;
-        c->freq = freq;
-        c->resp = resp;
-        c->gewi = gewi;
-        c->hoew = hoew;
-        c->fehl0 = fehl0;
-        c->fehl1 = fehl1;
+        *c = parsed;
         c->ndim = ndim;
         c->dims = malloc((size_t)ndim * sizeof(long));
         c->codes = malloc((size_t)ndim * sizeof(char *));
@@ -166,11 +236,23 @@ int ghm_parse_cells(const char *path, ghm_cell **out, long *n,
             free(c->codes);
             free_quoted(quoted, nq);
             fclose(fd);
-            free(cells);
+            ghm_free_cells(cells, count);
             return -1;
         }
         for (long i = 0; i < ndim; i++) {
-            c->dims[i] = strtol(quoted[i], NULL, 10);
+            char *end;
+            errno = 0;
+            c->dims[i] = strtol(quoted[i], &end, 10);
+            if (end == quoted[i] || *end || errno == ERANGE || c->dims[i] < 0) {
+                if (errbuf && errlen) snprintf(errbuf, errlen, "invalid cell coordinate");
+                free(c->dims); free(c->codes);
+                free_quoted(quoted, nq);
+                fclose(fd);
+                ghm_free_cells(cells, count);
+                return -1;
+            }
+        }
+        for (long i = 0; i < ndim; i++) {
             c->codes[i] = quoted[ndim + i]; /* take ownership */
         }
         /* The dimension keys were copied via strtol; free their
@@ -182,6 +264,12 @@ int ghm_parse_cells(const char *path, ghm_cell **out, long *n,
         count++;
     }
 
+    if (ferror(fd)) {
+        if (errbuf && errlen) snprintf(errbuf, errlen, "error reading cells file");
+        fclose(fd);
+        ghm_free_cells(cells, count);
+        return -1;
+    }
     fclose(fd);
     *out = cells;
     *n = count;
