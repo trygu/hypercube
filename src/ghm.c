@@ -36,11 +36,37 @@ int ghm_run(const char *steer_file, const char *cells_file,
     memset(res, 0, sizeof(*res));
     err[0] = '\0';
 
+    /* A missing input file is a distinct, common failure mode; the
+     * PARSE_* codes are reserved for files that exist but do not
+     * parse. */
+    {
+        FILE *probe = fopen(steer_file, "r");
+        if (!probe) {
+            res->code = GHM_ERR_NO_STEERING;
+            snprintf(res->message, sizeof(res->message),
+                     "cannot open steering file: %s", steer_file);
+            return res->code;
+        }
+        fclose(probe);
+    }
+
     ghm_table t;
     if (ghm_parse_steering(steer_file, &t, err, sizeof(err))) {
         res->code = GHM_ERR_PARSE_STEERING;
         snprintf(res->message, sizeof(res->message), "steering: %s", err);
         return res->code;
+    }
+
+    {
+        FILE *probe = fopen(cells_file, "r");
+        if (!probe) {
+            ghm_free_table(&t);
+            res->code = GHM_ERR_NO_CELLS;
+            snprintf(res->message, sizeof(res->message),
+                     "cannot open cells file: %s", cells_file);
+            return res->code;
+        }
+        fclose(probe);
     }
 
     ghm_cell *cells = NULL;
