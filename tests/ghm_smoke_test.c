@@ -52,9 +52,14 @@ int main(void)
     remove("ghm_smoke_steer2");
 
     memset(&p, 0, sizeof(p));
-    p.minw = 0.0;
-    p.maxw = 1000.0;
-    p.exact = 0;
+    /* Supported flat/exact-only parameters; other controls are explicitly
+     * rejected by ghm_validation_test instead of being silently ignored. */
+    p.minw = 1.0;
+    p.maxw = 100.0;
+    p.exact = 1;
+    p.gewran = 1;
+    p.schaez = 1;
+    p.print1 = 1;
 
     /* Null arguments are rejected. */
     CHECK(ghm_run(NULL, cells, out, &p, &res) == GHM_ERR_BAD_ARGS,

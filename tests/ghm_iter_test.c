@@ -431,11 +431,10 @@ int main(void)
     run_case("flat2d_cost", eingabe_cost, expected_cost, 3, &p);
     run_case("flat2d_shared", eingabe_shared, expected_shared, 2, &p);
 
-    /* n-D flat cases: distinct values -> the {1,2}^n hypercube. Keep the
-     * bounds honest for the value range (the flat path ignores them). */
+    /* n-D flat cases: distinct values -> the {1,2}^n hypercube. The
+     * supported exact-only mode has no quantitative interval controls. */
     ghm_params pn;
     memcpy(&pn, &p, sizeof pn);
-    pn.maxw = 10000.0;
     run_ndim_case(3, 3, &pn);
     run_ndim_case(4, 3, &pn);
     run_ndim_case(5, 3, &pn);

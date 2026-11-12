@@ -24,7 +24,7 @@
  *
  * Per 4.1 section 2.8.1: for each primary suppression, build every
  * hypercube with that cell as a corner point; when no interval bound is
- * required, every such hypercube is feasible; choose the feasible
+ * required, hypercubes with all nonzero corners are feasible; choose the feasible
  * hypercube of minimum information loss (first the number of additional
  * suppressions, then the sum of the logarithmic costs of the cells that
  * would become secondarily unsafe); and suppress all of its corner
@@ -41,6 +41,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <limits.h>
+#include <stdint.h>
 
 #include "ghm_iter.h"
 
@@ -73,9 +75,37 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
                  char *errbuf, size_t errlen)
 {
     (void)p;
+    if (!t || !cells || !out_wertart || !out_n_secondary || ncells <= 0) {
+        snprintf(errbuf, errlen, "missing or empty grid");
+        return -1;
+    }
+    *out_n_secondary = 0;
     int ndim = t->ndim;
     if (ndim < 1 || ndim > 6) {
         snprintf(errbuf, errlen, "unsupported dimension %d", ndim);
+        return -1;
+    }
+
+    /* Modified 2026-11-12: validate the entire grid before indexing it.
+     * ncells and unique in-range keys establish Cartesian completeness. */
+    long total = 1;
+    int max_codes = 0;
+    for (int d = 0; d < ndim; d++) {
+        if (t->ms[d] != 2 || t->ncodes[d] < 1 ||
+            t->groups[d][0] != t->ncodes[d] - 1 || t->groups[d][1] != 1) {
+            snprintf(errbuf, errlen, "only flat dimensions are supported");
+            return -1;
+        }
+        if (total > INT_MAX / t->ncodes[d]) {
+            snprintf(errbuf, errlen, "table dimensions are too large");
+            return -1;
+        }
+        total *= t->ncodes[d];
+        if (t->ncodes[d] > max_codes) max_codes = t->ncodes[d];
+    }
+    if (ncells != total || (size_t)total > SIZE_MAX / sizeof(gcell) ||
+        (size_t)max_codes > SIZE_MAX / ((size_t)ndim * sizeof(long))) {
+        snprintf(errbuf, errlen, "cells must form a complete, size-safe grid");
         return -1;
     }
 
@@ -88,7 +118,6 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
     stride[ndim - 1] = 1;
     for (int d = ndim - 2; d >= 0; d--)
         stride[d] = stride[d + 1] * (long)t->ncodes[d + 1];
-    long total = stride[0] * (long)t->ncodes[0];
 
     gcell *grid = calloc((size_t)total, sizeof(gcell));
     if (!grid) {
@@ -98,7 +127,7 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
     }
 
     long *code = malloc((size_t)ndim * sizeof(long));   /* primary codes */
-    long *nbrs = malloc((size_t)ndim * (size_t)total * sizeof(long)); /* per dim neighbour lists */
+    long *nbrs = malloc((size_t)ndim * (size_t)max_codes * sizeof(long));
     long *stride_nbr = malloc((size_t)ndim * sizeof(long));
     long *cnt_nbr = malloc((size_t)ndim * sizeof(long));
     if (!code || !nbrs || !stride_nbr || !cnt_nbr) {
@@ -108,11 +137,47 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
         return -1;
     }
 
+    int result = -1;
+    for (long i = 0; i < total; i++) grid[i].file_idx = -1;
+    for (int d = 0; d < ndim; d++) {
+        if (t->codes[d][t->ncodes[d] - 1] != 0) {
+            snprintf(errbuf, errlen, "flat dimensions require code 0 as the total");
+            goto cleanup;
+        }
+        long *seen = &nbrs[(size_t)d * (size_t)max_codes];
+        memset(seen, 0, (size_t)t->ncodes[d] * sizeof(long));
+        for (int j = 0; j < t->ncodes[d]; j++) {
+            long key = t->codes[d][j];
+            if (key < 0 || key >= t->ncodes[d] || seen[key]) {
+                snprintf(errbuf, errlen, "invalid or duplicate steering code");
+                goto cleanup;
+            }
+            seen[key] = 1;
+        }
+    }
+
     /* Place each cell at its grid index; primaries become status 1. */
     for (long i = 0; i < ncells; i++) {
+        if (cells[i].ndim != ndim || !cells[i].dims ||
+            !isfinite(cells[i].resp) || cells[i].resp < 0 || !isfinite(cells[i].fehl0) ||
+            !isfinite(cells[i].fehl1) || cells[i].freq < 0 ||
+            (cells[i].wertart != 1 && cells[i].wertart != 129) ||
+            cells[i].gewi != 1 || cells[i].hoew != 1) {
+            snprintf(errbuf, errlen, "invalid cell dimensions, values or flags");
+            goto cleanup;
+        }
         long idx = 0;
-        for (int d = 0; d < ndim; d++)
+        for (int d = 0; d < ndim; d++) {
+            if (cells[i].dims[d] < 0 || cells[i].dims[d] >= t->ncodes[d]) {
+                snprintf(errbuf, errlen, "cell coordinate out of range");
+                goto cleanup;
+            }
             idx += cells[i].dims[d] * stride[d];
+        }
+        if (grid[idx].file_idx != -1) {
+            snprintf(errbuf, errlen, "duplicate cell coordinate");
+            goto cleanup;
+        }
         grid[idx].value = cells[i].resp;
         grid[idx].file_idx = (int)i;
         grid[idx].status = (cells[i].wertart == 129) ? 1 : 0;
@@ -134,7 +199,7 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
         /* Build the per-dimension neighbour lists for this primary. */
         for (int d = 0; d < ndim; d++)
             cnt_nbr[d] = flat_neighbours((int)code[d], t->ncodes[d],
-                                         &nbrs[(size_t)d * (size_t)total]);
+                                         &nbrs[(size_t)d * (size_t)max_codes]);
         stride_nbr[ndim - 1] = 1;
         for (int d = ndim - 2; d >= 0; d--)
             stride_nbr[d] = stride_nbr[d + 1] * cnt_nbr[d + 1];
@@ -148,14 +213,21 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
 
         for (long h = 0; h < total_hc; h++) {
             int nsafe = 0;
+            int feasible = 1;
             double cost = 0.0;
             for (long m = 0; m < masks; m++) {
                 long gi = 0;
                 for (int d = 0; d < ndim; d++) {
                     long j = (h / stride_nbr[d]) % cnt_nbr[d];
-                    long c = (m & (1L << d)) ? nbrs[(size_t)d * (size_t)total + j]
+                    long c = (m & (1L << d)) ? nbrs[(size_t)d * (size_t)max_codes + j]
                                              : code[d];
                     gi += c * stride[d];
+                }
+                /* A zero corner cannot establish the nonzero-corner
+                 * protection criterion, even if it is already suppressed. */
+                if (grid[gi].value == 0.0) {
+                    feasible = 0;
+                    break;
                 }
                 if (gi == pidx)
                     continue;   /* the primary itself */
@@ -165,6 +237,7 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
                     cost += log(v > 0.0 ? v : 1.0);
                 }
             }
+            if (!feasible) continue;
             if (nsafe == 0)
                 already_protected = 1;
             if (!have_best || nsafe < best_nsafe ||
@@ -179,12 +252,17 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
         if (already_protected)
             continue;
 
+        if (!have_best) {
+            snprintf(errbuf, errlen, "no feasible nonzero hypercube for a primary cell");
+            goto cleanup;
+        }
+
         /* Suppress every safe corner of the chosen hypercube. */
         for (long m = 0; m < masks; m++) {
             long gi = 0;
             for (int d = 0; d < ndim; d++) {
                 long j = (best_h / stride_nbr[d]) % cnt_nbr[d];
-                long c = (m & (1L << d)) ? nbrs[(size_t)d * (size_t)total + j]
+                long c = (m & (1L << d)) ? nbrs[(size_t)d * (size_t)max_codes + j]
                                          : code[d];
                 gi += c * stride[d];
             }
@@ -206,12 +284,14 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
         out_wertart[i] = (s == 2) ? 1129 : (s == 1) ? 129 : 1;
     }
     *out_n_secondary = nsec;
+    result = 0;
 
+cleanup:
     free(stride);
     free(grid);
     free(code);
     free(nbrs);
     free(stride_nbr);
     free(cnt_nbr);
-    return 0;
+    return result;
 }
