@@ -1,0 +1,25 @@
+hypercube: copyright, licence and source notice
+
+Copyright IT Nordrhein Westfalen. GHMITER by Giessing/Repsilber.
+Copyright 2026 Trygve Tatsuya Falch (original fork contributions).
+
+This fork is distributed under the European Union Public Licence, version 1.2
+(EUPL-1.2). The full text is in LICENCE.
+
+Upstream code was released under EUPL 1.1. Article 5 of EUPL 1.1 permits
+redistribution under a later EUPL version unless the original work expressly
+limits distribution to that version only. This distribution exercises that
+permission. The upstream notices reviewed do not state such an "only"
+limitation. Original copyright and EUPL 1.1 notices are retained; a copy of
+the original licence is in LICENSES/EUPL-1.1.txt.
+
+Original contributions and modifications by Trygve Tatsuya Falch are also
+licensed under EUPL-1.2. Separately identified third-party material retains
+its original notices and terms. This notice grants no rights beyond those
+held by the respective licensors.
+
+Source code: https://github.com/trygu/hypercube
+Upstream: https://github.com/sdcTools/hypercube
+The repository's source and history identify the fork modifications and dates.
+Licensing clarification recorded 2026-11-12; this notice does not replace
+original source notices or change their historical dates.

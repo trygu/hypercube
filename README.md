@@ -104,5 +104,6 @@ ctest --test-dir build --output-on-failure
 
 ## License
 
-EUPL 1.1, same as the rest of the tauargus engine and the original
-GHMITER source.
+This fork is distributed under **EUPL-1.2**; see [LICENCE](LICENCE).
+Original upstream EUPL 1.1 and copyright notices are retained. The later-version
+permission in Article 5 of EUPL 1.1 is explained in [NOTICE.txt](NOTICE.txt).
