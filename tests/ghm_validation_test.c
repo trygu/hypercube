@@ -121,6 +121,11 @@ static void test_malformed(void)
     CHECK(run(&p, &r) != GHM_OK, "overflowing group counts are rejected");
     steering("1 2"); cells(0, 0);
     CHECK(run(&p, &r) != GHM_OK, "nonflat group structure is rejected");
+    FILE *bad = fopen(steer, "w");
+    fprintf(bad, "'bad total'\n'(5(A8,1X))'\n2\n2 2\n1 1\n0 0\n"
+                 "'A'\n2 1\n2 0 1\n'B'\n2 1\n2 1 0\n0 0\n1 1 1\n");
+    fclose(bad);
+    CHECK(run(&p, &r) != GHM_OK, "total must be code 0, not an individual code");
     steering("2 1");
     FILE *f = fopen(input, "w"); fclose(f);
     CHECK(run(&p, &r) != GHM_OK, "empty grid is rejected");

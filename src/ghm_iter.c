@@ -140,6 +140,10 @@ int ghm_iter_run(const ghm_table *t, const ghm_cell *cells, long ncells,
     int result = -1;
     for (long i = 0; i < total; i++) grid[i].file_idx = -1;
     for (int d = 0; d < ndim; d++) {
+        if (t->codes[d][t->ncodes[d] - 1] != 0) {
+            snprintf(errbuf, errlen, "flat dimensions require code 0 as the total");
+            goto cleanup;
+        }
         long *seen = &nbrs[(size_t)d * (size_t)max_codes];
         memset(seen, 0, (size_t)t->ncodes[d] * sizeof(long));
         for (int j = 0; j < t->ncodes[d]; j++) {
