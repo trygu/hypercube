@@ -58,6 +58,10 @@ install(TARGETS tauargus_ghm
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
+install(DIRECTORY src/
+    DESTINATION include/tauargus_ghm
+    FILES_MATCHING PATTERN "*.h"
+)
 
 # Smoke tests (run by the parent repo's dev loop,
 # scripts/dev-test.sh).
