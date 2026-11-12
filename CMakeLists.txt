@@ -79,4 +79,8 @@ if(TAUARGUS_GHM_BUILD_TESTS)
     add_executable(ghm_iter_test tests/ghm_iter_test.c)
     target_link_libraries(ghm_iter_test PRIVATE tauargus_ghm)
     add_test(NAME ghm_iter COMMAND ghm_iter_test)
+
+    add_executable(ghm_validation_test tests/ghm_validation_test.c)
+    target_link_libraries(ghm_validation_test PRIVATE tauargus_ghm)
+    add_test(NAME ghm_validation COMMAND ghm_validation_test)
 endif()

@@ -33,16 +33,19 @@ extern "C" {
 #define GHM_ERR_NO_CELLS          -4
 #define GHM_ERR_PARSE_CELLS       -5
 #define GHM_ERR_ALGORITHM         -6  /* internal algorithm error */
+#define GHM_ERR_UNSUPPORTED       -7  /* setting/shape not implemented */
 #define GHM_ERR_NOT_IMPLEMENTED  -100 /* port in progress */
 
 /*
  * Run-level parameters that in the legacy flow lived in the control
- * file (TABELLE). The binding fills these from the batch's GH
- * suppress command. The per-dimension structure (codes, hierarchy
+ * file (TABELLE). Retained for API compatibility; this port supports only
+ * minw=1, maxw=100, nulw=absbet=qquote=dquote=0, gewran=schaez=exact=1,
+ * mode=0, print1=0 or 1. Other settings return GHM_ERR_UNSUPPORTED.
+ * These defaults do not impose quantitative protection intervals. Cell
+ * fehl0/fehl1 are carried through, not enforced. The structure (codes, hierarchy
  * levels, boundary flags) comes from the steering file; the cell
  * values and the primary-suppression marker come from the cells file.
- * This is the initial set; it is finalized as the steering parser
- * lands (the COMMON /MWX/, /ABSBET/, /EXACT/ blocks of the Fortran).
+ * Only flat, complete grids of finite nonnegative values are supported.
  */
 typedef struct {
     double minw;     /* lower bound of the safety interval */

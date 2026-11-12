@@ -2,9 +2,9 @@
 
 The **ghm** module is the hypercube secondary-suppression method of
 the τ-ARGUS engine (the legacy `GH(TabNo, AprioriPct, ModelSize,
-ApplySingleton)` batch method). It is the documented protection route
-for 5- and 6-dimensional tables and for linked table sets, where the
-optimization-based suppression (csp) is limited to four dimensions.
+ApplySingleton)` batch method). This port supports individual flat tables
+with one to six dimensions. Linked tables, hierarchies, weighted tables,
+singleton protection and quantitative protection intervals are not implemented.
 
 It is an in-process C port of the GHMITER 4 program
 (Gießing/Repsilber), originally Copyright IT Nordrhein Westfalen,
@@ -26,8 +26,7 @@ formats are unchanged, and they are the same ones the core's
 - `ghm_run(steer, cells, result, params)` reads them, runs the
   algorithm, and writes the **result** file whose per-cell lines
   carry a leading token of `1129` where the cell is set
-  **secondarily unsafe**, plus the `proto001`-`proto003` diagnostic
-  files; one table per call, explicit file names, no working
+  **secondarily unsafe**; one table per call, explicit file names, no working
   directory;
 - the core reads the result file back
   (`CGhmiter::SetSecondaryUnsafe`) and marks the cells.
@@ -35,9 +34,11 @@ formats are unchanged, and they are the same ones the core's
 There is no **control** file. The legacy control file (`TABELLE`)
 existed to drive the external executable over many tables at once;
 in the in-process flow the binding already loops over tables, so the
-run-level parameters the control file carried (MINW/MAXW/NULW/ABSBET,
-the quota, the `EXACT` 0/1/2 and weighting flags) are a `ghm_params`
-struct the binding fills from the batch's GH command.
+run-level parameters the control file carried remain in `ghm_params` for
+API compatibility. Only the binding defaults are accepted: `minw=1`,
+`maxw=100`, `nulw=absbet=qquote=dquote=0`, `gewran=schaez=exact=1`,
+`mode=0` and `print1=0` or `1`. Other controls fail explicitly with
+`GHM_ERR_UNSUPPORTED`; their legacy behavior is not implemented.
 
 **Naming.** The legacy executable worked in German: files
 `TABELLE`/`STEUER`/`EINGABE`/`AUSGABE` and identifiers such as
@@ -58,23 +59,36 @@ One file per responsibility, following the other engine submodules:
   per call)
 - `ghm_steering.c` — steering file parser (codes, hierarchy levels)
 - `ghm_cells.c` — cells file parser (per-cell records)
-- `ghm_iter.c` — the iterative suppression algorithm (cube ratio,
-  corner selection, protection-ratio degradation)
-- `ghm_frozen.c` — frozen-cell handling (the `EXACT` 0/1/2
-  behaviours)
-- `ghm_output.c` — result file and proto diagnostics
+- `ghm_iter.c` — flat hypercube selection and input/grid validation
 
-`ghm.h` holds the public API and the shared structures. (Only the
-entry point exists so far; the split lands with the first parsers.)
+`ghm.h` holds the public API and shared structures. Result records are
+written by `ghm.c`; proto diagnostic files are not emitted.
 
-## Status
+## Supported scope and validation
 
-Port in progress (0.8.0 scope). The entry point `ghm_run`
-(`src/ghm.h`) is validated up to the steering-file check and returns
-`GHM_ERR_NOT_IMPLEMENTED` until the parsers and the algorithm land.
-The port is verified against the Fortran original (built as a
-development oracle) on a battery of tables, flat, hierarchical and
-linked.
+For every primary, the algorithm selects a hypercube with all nonzero
+corners, minimizing the number of additional suppressions, then logarithmic
+cost. Zero corners are ineligible, including zeros already marked primary.
+If no feasible cube exists, the call fails before writing a result. Existing
+result files are not removed on failure: callers must check the return code.
+
+The cells file must contain exactly one record per Cartesian grid position,
+including totals and zero cells. Dimensions, coordinates, duplicate keys,
+record counts, numeric values, flags and size arithmetic are validated before
+indexing the grid. Values must be finite and nonnegative. The caller remains
+responsible for consistent additive totals.
+
+This implements the exact-reconstruction criterion, not the full legacy
+GHMITER protection model. In particular, `fehl0`/`fehl1` protection levels
+are carried through but not enforced. Default `minw`/`maxw` do not impose
+bounds on the inferred value. Independently audit realized intervals against
+the publication requirements. A successful run alone does not establish that
+those requirements are met.
+
+Regression tests cover selected flat Fortran comparisons, additive zero-cell
+handling, one- to six-dimensional grids, malformed inputs and rejected
+controls. They do not establish hierarchical, linked-table or quantitative
+protection equivalence with the Fortran program.
 
 ## Build
 
@@ -94,7 +108,7 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
-Tests (smoke test on the entry point):
+Tests (parsers, flat iteration and safety regressions):
 
 ```bash
 cmake -S . -B build -DTAUARGUS_GHM_BUILD_TESTS=ON
